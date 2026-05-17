@@ -1,0 +1,102 @@
+SET E to CONSTANT:E.
+SET G0 to CONSTANT:g0.
+SET t to 0.
+SET MANUEVERDV to 599.
+
+SET TANK to SHIP:PARTSTAGGED("TLITank").
+SET ENGINE to SHIP:PARTSTAGGED("TLIEngine").
+
+CLEARSCREEN.
+
+PRINT "INITIALIZING GUIDANCE CALC. PLEASE WAIT...".
+
+WAIT 1.
+
+//Initial Mass
+SET M0 TO SHIP:MASS * 1000.
+PRINT "Initial Mass: " + Round(M0 ,2) + " kg".
+
+//Delta Mass (Residuals accounted for)
+SET dM to((TANK[0]:WETMASS - TANK[0]:DRYMASS) - TANK[0]:WETMASS*0.0351)  * 1000.
+PRINT "Delta Mass: " + Round(dM,2) + " kg".
+
+//Final Mass
+SET Mf to M0 - dM .
+PRINT "Final Mass: " + Round(Mf,2) + " kg".
+
+//Vacuum ISP
+SET ISP to ENGINE[0]:VISP.
+PRINT "vISP: " + ROUND(ISP,2) + " sec".
+
+//Thrust
+SET F to ENGINE[0]:POSSIBLETHRUST *1000.
+PRINT "Thrust: " + ROUND(F,0) + " N".
+
+//Mass Flow Rate 
+Set mFR to F / (ISP * G0).
+Print "Mass Flow Rate: " + ROUND(mFR,2) + " kg / s".
+
+//Burn Time
+SET bT to dM / mFR.
+Print "Projected Burn Time: " + ROUND(bT,2) + " sec".
+
+//Exhaust Velocity
+SET EXH to (ENGINE[0]:VISP * G0).
+PRINT "Exhaust Velocity: " + ROUND(EXH,2) + " m/s".
+
+//Projected Delta V
+SET DV to ISP * G0 * ln( M0 / Mf).
+PRINT "DeltaV for Stage: " + ROUND(DV,2) + " m/s".
+
+WAIT 3.
+
+//TEST GIVEN MANUEVER OF 3000m/s via numerical method
+PRINT "Calculating burn time for manuever [" + MANUEVERDV + "] m/s." + " Please wait...".
+
+FROM {
+	local IMPULSE is 0. 
+	local dT is 0.1.
+	local dI is 0.
+	}
+UNTIL IMPULSE >= MANUEVERDV		
+STEP {
+	Set dI to (F / (m0 - (mfr*t))).
+	Set IMPULSE to IMPULSE + (dI * dt).
+	set t to t + dt.
+	WAIT 0.01.
+	}		
+DO {
+	//PRINT "Iteration T+" + Round(t,1).
+	//PRINT "MASS EXPENDED: " + (MFR * t) + " kg".
+	//PRINT "Total Impulse: " + ROUND(IMPULSE, 1) + " m/s".
+	//PRINT "Acceleration: " + ROUND(dI,1) + " m/s".
+}
+
+Print "NODE EXECUTE LENGTH	: " + ROUND(t,2) + " sec".
+
+//TEST GIVEN MANUEVER OF 3000m/s via numerical method
+PRINT "Calculating burn delay time for manuever [" + MANUEVERDV + "]  m/s." + " Please wait...".
+
+Set t to 0.
+
+FROM {
+	local IMPULSE is 0. 
+	local dT is 0.1.
+	local dI is 0.
+	}
+UNTIL IMPULSE >= MANUEVERDV / 2		
+STEP {
+	Set dI to (F / (m0 - (mfr*t))).
+	Set IMPULSE to IMPULSE + (dI * dt).
+	set t to t + dt.
+	WAIT 0.01.
+	}		
+DO {
+	//PRINT "Iteration T+" + Round(t,1).
+	//PRINT "MASS EXPENDED: " + (MFR * t) + " kg".
+	//PRINT "Total Impulse: " + ROUND(IMPULSE, 1) + " m/s".
+	//PRINT "Acceleration: " + ROUND(dI,1) + " m/s".
+}
+
+Print "NODE EXECUTE LENGTH	: " + ROUND(t,2) + " sec".
+
