@@ -1,0 +1,271 @@
+CLEARSCREEN.
+
+SET RUNMODE TO "INIT".
+SET G0 to CONSTANT:g0.
+
+FUNCTION ROCKET_CALC {
+
+    SET m0 TO (SHIP:MASS).
+    SET dM to((TANK[0]:WETMASS - TANK[0]:DRYMASS) - TANK[0]:WETMASS*0.0072).
+    SET m1 to m0 - dM.
+    SET iSP to ENGINE[0]:VISP.
+    SET f to ENGINE[0]:POSSIBLETHRUST.
+    Set mFR to ENGINE[0]:MAXMASSFLOW.
+    SET bT to dM / mFR.       
+    SET eXH to (ENGINE[0]:VISP * G0).
+    SET dV to ISP * G0 * ln( M0 / M1).
+
+    local RESULT is Lexicon(  
+        "m0", m0,
+        "dM", dM,
+        "m1", m1,
+        "iSP", iSP,
+        "f", f,
+        "mFR", mFR,
+        "bT", bT,
+        "eXH", eXH,
+        "dV", DV
+    ).
+
+  return RESULT.
+}
+
+//Main Loop.
+UNTIL RUNMODE = "FINISHED" {
+
+    //Program initialization. 
+    IF RUNMODE = "INIT" {
+        
+        PRINT "PROGRAM INIT".
+
+        SET CONFIG:DEFAULTFONTSIZE to 20.
+        SET CONFIG:DEFAULTWIDTH TO 100.
+        SET CONFIG:DEFAULTHEIGHT TO 75.
+        SET RUNMODE TO "WAITING".
+
+        SET TANK to SHIP:PARTSTAGGED("TLITank").
+        SET ENGINE to SHIP:PARTSTAGGED("TLIEngine").
+
+        SET CH to "".
+    } 
+
+    //Wait for a node. Press HOME to initialize guidance.
+    ELSE IF RUNMODE = "WAITING" {
+        
+        
+        PRINT "WAITING FOR NODE".
+        WAIT UNTIL HASNODE.
+
+        PRINT "NODE DETECTED. PRESS 'HOME' TO INIT GUIDANCE PROGRAM".
+        UNTIL CH = TERMINAL:INPUT:HOMECURSOR() {
+            set CH to TERMINAL:INPUT:GETCHAR().
+        }
+
+        PRINT "INIT GUIDANCE SEQUENCE".
+        PRINT " ".
+
+        WAIT 1.
+        
+        SET MANUEVER TO NEXTNODE.
+        
+        SET nP TO MANUEVER:DELTAV().
+        SET mPRO TO MANUEVER:PROGRADE().
+        SET mRAD TO MANUEVER:RADIALOUT().
+        SET mNML TO MANUEVER:NORMAL().
+
+        SET mDV to abs(mPRO)+abs(mRAD)+abs(mNML).
+
+        SET RUNMODE TO "STAGE_CALC".
+    }
+
+    //Display stage characteristics.
+    ELSE IF RUNMODE = "STAGE_CALC" {
+
+        SET t to 0.
+
+        PRINT "CALCULATING STAGE DATA".	
+        PRINT " ".
+        
+        set rC to ROCKET_CALC().
+
+        PRINT "Initial Mass: " + Round(rC:M0()*1000 ,2) + " kg".
+        PRINT "Delta Mass: " + Round(rC:dM()*1000,2) + " kg".
+        PRINT "Final Mass: " + Round(rC:m1()*1000,2) + " kg".
+        PRINT "vISP: " + ROUND(rC:ISP(),2) + " sec".
+        PRINT "Thrust: " + ROUND(rC:F()*1000,0) + " N".
+        Print "Mass Flow Rate: " + ROUND(rC:mFR()*1000,2) + " kg / s".
+        Print "Projected Burn Time: " + ROUND(rC:bT(),2) + " sec".
+        PRINT "Exhaust Velocity: " + ROUND(rC:EXH(),2) + " m/s".
+        PRINT "DeltaV for Stage: " + ROUND(rC:DV(),2) + " m/s".
+        PRINT " ".
+
+        WAIT 1. 
+        
+        SET RUNMODE TO "MANUEVER_CALC".
+    }
+
+    //Calculate manuever execution characteristics.
+    ELSE IF RUNMODE = "MANUEVER_CALC" {
+        
+        PRINT "CALCULATING MANUEVER PARAMETERS".    
+
+        set rC to ROCKET_CALC().
+
+        FROM {
+            local IMPULSE is 0. 
+            local dT is 0.1.
+            local dI is 0.
+            }
+        UNTIL IMPULSE >= mDV		
+        STEP {
+            Set dI to (rC:F() / (rC:m0() - (rC:mFR()*t))).
+            Set IMPULSE to IMPULSE + (dI * dt).
+            set t to t + dt.
+            WAIT 0.01.
+            }		
+        DO {
+        }
+        Set mET to t.
+        PRINT " ".
+
+        Set t to 0.
+
+        //Calculate burn preemption (?)
+        FROM {
+            local IMPULSE is 0. 
+            local dT is 0.1.
+            local dI is 0.
+            }
+        UNTIL IMPULSE >= mDV/2		
+        STEP {
+            Set dI to (rC:F() / (rC:m0() - (rC:mFR()*t))).
+            Set IMPULSE to IMPULSE + (dI * dt).
+            set t to t + dt.
+            WAIT 0.01.
+            }		
+        DO {
+        }
+        Set mD to t.
+        
+        //Calculate burn start time, accounting for spindown
+        SET mT to TIMESTAMP(MANUEVER:TIME). 
+        set mS to TIMESTAMP(MANUEVER:TIME - mD - 1.3).
+        set mC to TIMESTAMP(MANUEVER:TIME + (mET - mD - 1.3)).
+
+        PRINT "MANUEVER TIMESTAMP " + mT:CLOCK + " UTC". 
+        PRINT "BURN START TIME " + mS:CLOCK + " UTC".
+        PRINT "BURN END TIME  " + mC:CLOCK + " UTC".
+
+        PRINT "MANUEVER BURN LENGTH " + ROUND(mET,2) + " sec".
+        PRINT "MANUEVER START TIME " + "mST-" + ROUND(mD,1) + " sec".
+        PRINT " ".
+
+        WAIT 1.
+
+        SET RUNMODE TO "MANUEVER_EXECUTE".
+        
+    } 
+
+    //Handle steering the ship to the manuever and timewarping.
+    
+    ELSE IF RUNMODE = "MANUEVER_EXECUTE" {
+
+        WAIT UNTIL TIME > mS.
+
+        PRINT "MANUEVER GO".
+
+        SET nREM TO nP:MAG() + 50.
+
+        WAIT 0.
+
+        SET tV to v(0,0,0).
+        SET dA TO 0.
+        SET dVT TO v(0,0,0).
+        SET I TO v(0,0,0).
+
+        SET PRO TO v(0,0,0).
+        SET RAD TO v(0,0,0).
+        SET NML TO v(0,0,0).
+
+        SET sFP TO 0.
+        SET sFR TO 0.
+        SET sFN TO 0.
+        SET sFO TO v(0,0,0).
+
+        SET dT TO 0.1.
+
+        SET t0 TO TIME:SECONDS.
+        SET m0 TO SHIP:MASS.
+
+        CLEARSCREEN.
+
+        UNTIL (nRem < 20) {
+            
+            SET t1 to TIME:SECONDS.
+            SET m1 to SHIP:MASS.
+
+            SET dT to t1 - t0.
+            SET dM to m0 - m1.
+
+            //Exhaust Velocity
+            SET EXH to (ENGINE[0]:ISP * G0).
+            SET sF TO SHIP:FACING:VECTOR().
+        
+            SET ORBVEL to SHIP:ORBIT:VELOCITY:ORBIT().
+            SET PRO to ORBVEL:DIRECTION:VECTOR():NORMALIZED().
+            SET NML to VCRS(SHIP:ORBIT:POSITION(),SHIP:ORBIT:VELOCITY:ORBIT()):NORMALIZED().
+            SET RAD to VCRS(NML, PRO):NORMALIZED().
+
+            SET sFP TO VDOT(sF, PRO).
+            SET sFR TO VDOT(sF, RAD).
+            SET sFN TO VDOT(sF, NML).
+            Set sFO to v(sFP, sFR, sFN):DIRECTION:VECTOR().
+
+            Set dA to (exh * ln(m0/m1)).
+            Set dVT to (sFO * dA) + dVT.
+            Set nRem to (mPRO + mRAD + mNML) - (abs(dVT:X())+abs(dVT:Y())+abs(dVT:Z())).
+
+            if TIME > mT-0.1{
+            } else {
+                Set mF to NEXTNODE:DELTAV().
+                SET mPRO TO NEXTNODE:PROGRADE().
+                SET mRAD TO NEXTNODE:RADIALOUT().
+                SET mNML TO NEXTNODE:NORMAL().    
+            }
+
+            print "THRUST: " + ENGINE[0]:THRUST() + " N" at (0,3).
+            print "DT: " + dT AT (0, 4).
+            PRINT "DA: "  + dA AT (0, 5).
+            print "NODE EXEC TIME: " + mt:CLOCK + " UTC" at (0,6).
+            PRINT "Ship Facing Vector: " + v(round(sFP,2), round(sFR,2), round(sFN,2)) AT (0,9).
+            PRINT "THRUST VECTOR: " + tV AT (0,10).
+            PRINT "DVT: " + DVT AT (0,11).
+
+
+
+            LOCK THROTTLE TO 1.
+
+            set t0 to TIME:SECONDS.
+            set m0 to SHIP:MASS.
+            WAIT 0.
+        }		
+
+        LOCK THROTTLE TO 0.
+
+        ENGINE[0]:SHUTDOWN().
+
+        SET RUNMODE TO "GUIDANCE_FINISHED".
+
+    }
+
+    ELSE IF RUNMODE = "GUIDANCE_FINISHED" {
+        
+        PRINT "GUIDANCE COMPLETE !" at (0,45).
+
+        CLEARVECDRAWS().
+
+        SET RUNMODE TO "FINISHED".
+
+    }
+    
+}
